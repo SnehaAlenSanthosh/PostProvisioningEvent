@@ -1,0 +1,20 @@
+version: 0.2
+
+phases:
+    install:
+        runtime-versions:
+            python: 3.8
+        commands:
+            -echo "Install phase"
+    pre-build:
+        commands:
+            - echo "Pre-build phase"
+    build:
+        commands:
+            - echo "Build phase"
+    post-build:
+        commands:
+            - echo "Post-build phase"
+artifacts:
+    files:
+        - '**/*'
