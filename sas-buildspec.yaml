@@ -5,7 +5,7 @@ phases:
         runtime-versions:
             python: 3.8
         commands:
-            -echo "Install phase"
+            - echo "Install phase"
     pre_build:
         commands:
             - echo "Pre-build phase"
