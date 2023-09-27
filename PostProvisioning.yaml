@@ -1,0 +1,95 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation Template for creating a Step Function that calls another state machine and posts events
+
+Parameters:
+  InvokedStateMachineName:
+    Type: String
+    Description: Name of state machine that needs to be invoked from InvokerStateMachine
+    Default: InvokedStateMachineName
+
+Resources:
+  InvokerStateMachineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Path: "/"
+      Policies:
+        - PolicyName: StepFunctionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'events:PutEvents'   
+                  - 'events:PutRule'
+                  - 'events:PutTargets'
+                Resource: 
+                  - !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:event-bus/default"
+                  - !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/*"
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/stepfunctions/InvokerStateMachine:*"
+              - Effect: Allow
+                Action:
+                  - 'states:StartExecution'
+                Resource: !Sub "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${InvokedStateMachineName}"
+
+  InvokerStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: InvokerStateMachine
+      RoleArn: !GetAtt InvokerStateMachineRole.Arn
+      DefinitionString:
+        !Sub |
+          {
+            "Comment": "Step Function calling another Step Function and posting an event to EventBridge",
+            "StartAt": "InvokeOtherStateMachine",
+            "States": {
+              "InvokeOtherStateMachine": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::states:startExecution.sync:2",
+                "Parameters": {
+                  "StateMachineArn": "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${InvokedStateMachineName}", 
+                  "Input.$": "$.input" 
+                },
+                "ResultPath": "$.executionResult",
+                "Next": "PostEventToEventBridge", 
+                "Catch": [
+                  {
+                    "ErrorEquals": ["States.ALL"],
+                    "Next": "PostEventToEventBridge"
+                  }
+                ]
+              },
+              "PostEventToEventBridge": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::events:putEvents",
+                "Parameters": {
+                  "Entries": [
+                    {
+                      "Source": "InvokerStateMachine",
+                      "DetailType": "StepFunctionCompleted",
+                      "Detail": {
+                        "ExecutionResult.$": "$.executionResult"
+                      }
+                    }
+                  ]
+                },
+                "End": true
+              }
+            }
+          }
+
+Outputs:
+  StepFunctionArn:
+    Value: !Ref InvokerStateMachine
